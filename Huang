@@ -1,0 +1,110 @@
+function [iter, ghist] = Huang(A, b, x0, maxiter, theta)
+%HUANG_BB  BB method with Huang adaptive stepsize (tau=0.5)
+
+
+if nargin < 5, theta = 1e-6; end
+
+tau    = 0.5;
+n      = length(x0);
+ghist  = zeros(n, maxiter);
+
+
+x      = x0;
+g      = A*x + b;
+normg0 = norm(g);
+
+
+alpha  = (g'*g) / (g'*A*g);
+x      = x - alpha * g;
+g_prev = g;
+g      = A*x + b;
+ghist(:,1) = g;
+
+bb1_prev = alpha;
+bb2_prev = alpha;
+
+
+s_vec  = -alpha * g_prev;
+y_vec  = g - g_prev;
+sy     = s_vec' * y_vec;
+ss     = s_vec' * s_vec;
+yy     = y_vec' * y_vec;
+bb1_curr = ss / sy;
+bb2_curr = sy / yy;
+
+alpha  = bb1_curr;
+x      = x - alpha * g;
+g_prev = g;
+g      = A*x + b;
+ghist(:,2) = g;
+
+if norm(g) < theta * normg0
+    iter = 2;
+    return;
+end
+
+
+for iter = 3 : maxiter
+
+   
+    s_vec = -alpha * g_prev;
+    y_vec = g - g_prev;
+    sy    = s_vec' * y_vec;
+    ss    = s_vec' * s_vec;
+    yy    = y_vec' * y_vec;
+
+    if sy > eps && yy > eps
+        bb1_curr = ss / sy;
+        bb2_curr = sy / yy;
+    else
+        bb1_curr = bb1_prev;
+        bb2_curr = bb2_prev;
+    end
+
+
+    dbb1 = bb1_prev - bb1_curr;
+
+    if abs(dbb1) > eps * max(bb1_prev, bb1_curr)
+
+        dbb2  = bb2_prev - bb2_curr;
+        denom = bb2_prev * bb2_curr * dbb1;
+
+        p1_p3 =  dbb2 / denom;
+        p2_p3 = (bb1_prev*bb2_prev - bb1_curr*bb2_curr) / denom;
+
+        disc  = p2_p3^2 - 4*p1_p3;
+
+        if disc >= 0 && (p2_p3 + sqrt(disc)) > eps
+            alpha_new = 2 / (p2_p3 + sqrt(disc));
+        else
+            alpha_new = bb2_curr;
+        end
+
+
+        if bb2_curr / bb1_curr < tau
+            alpha = min([bb2_prev, bb2_curr, alpha_new]);
+            alpha = max(alpha, 1e-15);
+        else
+            alpha = bb1_curr;
+        end
+
+    else
+
+        alpha = bb1_curr;
+    end
+
+
+    bb1_prev = bb1_curr;
+    bb2_prev = bb2_curr;
+
+
+    g_prev = g;
+    x      = x - alpha * g;
+    g      = A*x + b;
+    ghist(:, iter) = g;
+
+    if norm(g) < theta * normg0
+        return;
+    end
+end
+end
