@@ -1,0 +1,120 @@
+%% ========================================================================
+%  Tune_Hanoi.m
+
+%% ========================================================================
+clear; clc;
+
+
+theta    = 1e-8;
+maxiter  = 50000;
+n        = 1000;
+cond_val = 1e6;
+n_trials = 100;
+n_probs  = 4;
+total_runs = n_probs * n_trials;   % 400
+
+m = 3;
+ind_candidates = [2, m+1, m+2];   % [2, 4, 5]
+score_modes    = 1:6;
+pow_exps       = [2, 3, 4, 5];
+kappa_list     = [2, 3];
+
+
+configs = [];
+for sm = score_modes
+    for is = ind_candidates
+        for it = ind_candidates
+            for pe = pow_exps
+                for kp = kappa_list
+                    configs(end+1,:) = [sm, is, it, pe, kp]; %#ok<AGROW>
+                end
+            end
+        end
+    end
+end
+n_configs    = size(configs, 1);   
+all_prob_flat = repelem(1:n_probs, n_trials);   
+fprintf('Total configs (KT+LMSD): %d x2, plus MLMSD baseline\n', n_configs);
+
+
+save_file  = 'tune_hanoi.mat';
+batch_size = 20;   
+
+if isfile(save_file)
+-
+    fprintf('Found existing %s, resuming...\n', save_file);
+    load(save_file, 'iters_KT','iters_LMSD','iters_MLMSD','c_done');
+    c_start = c_done + 1;
+    fprintf('Resuming from config %d / %d\n', c_start, n_configs);
+else
+   
+    iters_KT    = nan(n_configs, total_runs);
+    iters_LMSD  = nan(n_configs, total_runs);
+    iters_MLMSD = nan(1, total_runs);
+    c_start = 1;
+
+
+    fprintf('Running MLMSD baseline...\n');
+    for idx = 1:total_runs
+        prob_type = floor((idx-1)/n_trials) + 1;
+        rng(42 + idx);
+        [A, b, x0] = generate_problem(prob_type, n, cond_val);
+        try
+            [n_iter,~,~] = MLMSD(A, b, x0, m, maxiter, m+1, theta);
+            if n_iter >= maxiter; n_iter = NaN; end
+            iters_MLMSD(idx) = n_iter;
+        catch
+        end
+    end
+    fprintf('MLMSD baseline done.\n');
+end
+
+
+t_start = tic;
+
+for c = c_start:n_configs
+    sm     = configs(c,1);
+    is     = configs(c,2);
+    it_ind = configs(c,3);
+    pe     = configs(c,4);
+    kp     = configs(c,5);
+
+    for idx = 1:total_runs
+        prob_type = floor((idx-1)/n_trials) + 1;
+        rng(42 + idx);
+        [A, b, x0] = generate_problem(prob_type, n, cond_val);
+
+        % HanoiKT
+        try
+            [n_iter] = HanoiKT(A,b,x0,m,maxiter,is,it_ind,theta,pe,sm,kp);
+            if n_iter >= maxiter; n_iter = NaN; end
+            iters_KT(c,idx) = n_iter;
+        catch
+        end
+
+        % HanoiLMSD
+        try
+            [n_iter] = HanoiLMSD(A,b,x0,m,maxiter,is,it_ind,theta,pe,sm,kp);
+            if n_iter >= maxiter; n_iter = NaN; end
+            iters_LMSD(c,idx) = n_iter;
+        catch
+        end
+    end
+
+
+    if mod(c, batch_size) == 0 || c == n_configs
+        elapsed = toc(t_start);
+        eta     = elapsed / (c - c_start + 1) * (n_configs - c);
+        fprintf('Config %d/%d | elapsed %.1fmin | ETA %.1fmin\n', ...
+            c, n_configs, elapsed/60, eta/60);
+
+
+        c_done   = c;
+        tmp_file = [save_file '.tmp'];
+        save(tmp_file, 'iters_KT','iters_LMSD','iters_MLMSD', ...
+            'configs','c_done','n_configs','all_prob_flat');
+        movefile(tmp_file, save_file);
+    end
+end
+
+fprintf('All done. Results saved to %s\n', save_file);
