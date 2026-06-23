@@ -41,7 +41,6 @@ save_file  = 'tune_hanoi.mat';
 batch_size = 20;   
 
 if isfile(save_file)
--
     fprintf('Found existing %s, resuming...\n', save_file);
     load(save_file, 'iters_KT','iters_LMSD','iters_MLMSD','c_done');
     c_start = c_done + 1;
