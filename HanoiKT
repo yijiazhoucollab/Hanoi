@@ -1,0 +1,185 @@
+function [iter, Ahist, ghist, thist, xhist, ghistnorm, normg0, residualerrorhist, khist_all] = ...
+    HanoiKT(A, b, x0, m, maxiter, ind_score, ind_thresh, theta, pow_exp, score_mode, k_max)
+n = length(x0);
+xhist             = zeros(n, maxiter);
+ghist             = zeros(n, maxiter);
+ghistnorm         = zeros(1, maxiter);
+Ahist             = zeros(2*m+2, maxiter);
+thist             = zeros(2*m, maxiter);
+residualerrorhist = zeros(m, maxiter);
+khist             = zeros(1, maxiter);
+khist_all         = zeros(m, maxiter);
+
+x      = x0;
+g      = A*x + b;
+g0     = g;
+normg0 = norm(g0);
+alpha0 = (g'*g) / (g'*A*g);
+
+G           = zeros(n, m+1);
+G(:,1)      = g0;
+eta_history = zeros(m, 1);
+
+
+for i = 1:m
+    x = x - alpha0 * g;
+    xhist(:,i)     = x;
+    g              = A*x + b;
+    ghist(:,i)     = g;
+    ghistnorm(i)   = norm(g);
+    eta_history(i) = alpha0;
+    Ahist(2*m+1,i) = alpha0^(-1);
+    G(:,i+1)       = g;
+    if norm(g) < theta * normg0
+        iter = i;
+        return;
+    end
+end
+iter = m+1;
+
+
+while iter < maxiter
+
+    
+    [Q, ~] = qr(G(:,1:m), 0);
+    T      = Q' * A' * Q;
+    [Z, Ei]= eig(T);
+    W      = A * Q;
+    C      = W' * W;
+
+
+    [sorEi, sortI] = sort(diag(Ei));
+    sorZ = Z(:, sortI);
+
+    Ahist(1:m, iter) = sorEi;
+
+    
+    L_score  = compute_t_indr(G, Q, sorZ, sorEi, eta_history, ind_score  - 1, m);
+    L_thresh = compute_t_indr(G, Q, sorZ, sorEi, eta_history, ind_thresh - 1, m);
+
+    thist(1:m,     iter) = L_score;
+    thist(m+1:2*m, iter) = L_thresh;
+
+    
+    zCz_vec = diag(sorZ' * C * sorZ);
+    rho     = sqrt(max(0, zCz_vec - sorEi.^2));
+    gap     = zeros(m, 1);
+    if m == 1
+        gap(1) = NaN;
+    else
+        gap(1) = sorEi(2) - sorEi(1);
+        gap(m) = sorEi(m) - sorEi(m-1);
+        if m > 2
+            left_gap   = sorEi(2:m-1) - sorEi(1:m-2);
+            right_gap  = sorEi(3:m)   - sorEi(2:m-1);
+            gap(2:m-1) = min(left_gap, right_gap);
+        end
+    end
+    gap_safe = max(gap, eps(max(abs(sorEi))));
+    KT_error = (rho.^2) ./ gap_safe;
+    residualerrorhist(:, iter) = KT_error;
+
+    
+    hist_min_stepsize = min(Ahist(2*m+1, 1:iter-1));
+    k_values = zeros(m, 1);
+
+    for i_ritz = 1:m
+        theta_1       = min(hist_min_stepsize, sorEi(i_ritz));
+        tolerance     = (normg0^2 * theta_1^pow_exp * theta^2) ./ (n * sorEi.^pow_exp);
+        t_i           = L_thresh(i_ritz);
+        Delta_theta_i = KT_error(i_ritz);
+        theta_i       = sorEi(i_ritz);
+        error_ratio   = abs(Delta_theta_i) / abs(theta_i);
+
+        if t_i < tolerance(i_ritz)
+            k_values(i_ritz) = 0;
+        else
+            numerator   = log(tolerance(i_ritz) / t_i);
+            denominator = log(error_ratio);
+            if numerator > 0 || denominator > 0
+                k_values(i_ritz) = 0;
+            else
+                k_values(i_ritz) = floor(numerator / denominator) + 1;
+            end
+        end
+    end
+    khist_all(:, iter) = k_values;
+
+   
+    if iter == m+1
+        s = xhist(:,iter-m+1) - xhist(:,iter-m);
+    else
+        s = xhist(:,iter-m) - xhist(:,iter-m-1);
+    end
+    I      = find(sorEi > (G(:,2)-G(:,1))' * s * norm(s)^-2 * 0.99);
+    k_in_I = k_values(I);
+
+    if any((k_in_I >= 1) & (k_in_I <= k_max))
+        valid_global_indices = I((k_in_I >= 1) & (k_in_I <= k_max));
+        t_v  = L_score(valid_global_indices);
+        ei_v = sorEi(valid_global_indices)';
+        switch score_mode
+            case 1;  score = t_v          .* ei_v;
+            case 2;  score = t_v.^2       .* ei_v;        % 保留接口不用
+            case 3;  score = t_v          .* ei_v.^(3/2);
+            case 4;  score = t_v.^2       .* ei_v.^(3/2); % 保留接口不用
+            case 5;  score = t_v          .* ei_v.^2;
+            case 6;  score = t_v.^(3/2)   .* ei_v;
+        end
+        [~, local_idx] = max(score);
+        selected_idx   = valid_global_indices(local_idx);
+        k = k_values(selected_idx);
+    else
+        t_v  = L_score(I);
+        ei_v = sorEi(I)';
+        switch score_mode
+            case 1;  score = t_v          .* ei_v;
+            case 2;  score = t_v.^2       .* ei_v;
+            case 3;  score = t_v          .* ei_v.^(3/2);
+            case 4;  score = t_v.^2       .* ei_v.^(3/2);
+            case 5;  score = t_v          .* ei_v.^2;
+            case 6;  score = t_v.^(3/2)   .* ei_v;
+        end
+        [~, local_idx] = max(score);
+        selected_idx   = I(local_idx);
+        k = 1;
+    end
+
+    alpha = sorEi(selected_idx)^(-1);
+
+
+    for j = 1:k
+        if iter >= maxiter; break; end
+        khist(iter)        = k;
+        Ahist(2*m+1, iter) = alpha^(-1);
+        Ahist(2*m+2, iter) = k;
+        x = x - alpha * g;
+        xhist(:, iter)     = x;
+        g = A * x + b;
+        ghist(:, iter)     = g;
+        ghistnorm(iter)    = norm(g);
+        G(:, 1:m)          = G(:, 2:m+1);
+        G(:, m+1)          = g;
+        eta_history(1:m-1) = eta_history(2:m);
+        eta_history(m)     = alpha;
+        if norm(g) < theta * normg0; return; end
+        if any(isnan(g)) || any(isinf(g)); iter = maxiter; return; end
+        iter = iter + 1;
+    end
+
+end
+end
+
+%% ========================================================================
+function t_vec = compute_t_indr(G, Q, sorZ, sorEi, eta_history, ind_r,~)
+    m_len = size(G, 2) - 1;
+    if ind_r <= m_len
+        t_vec = (G(:, ind_r)' * Q * sorZ).^2;   
+    else
+        t_m     = (G(:, m_len)' * Q * sorZ).^2;  
+        alpha_m = eta_history(end);               
+        lam     = sorEi(:)';                      
+        t_vec   = t_m .* (1 - alpha_m .* lam).^2;
+    end
+end
+
