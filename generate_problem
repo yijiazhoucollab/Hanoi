@@ -1,0 +1,60 @@
+function [A, b, x0] = generate_problem(prob_type, n, cond_val)
+
+kappa = cond_val;
+
+switch prob_type
+
+    case 1  % Uniform
+        d        = zeros(n, 1);
+        d(1)     = 1;
+        d(n)     = kappa;
+        d(2:n-1) = 1 + (kappa - 1) * rand(n-2, 1);
+
+    case 2  % Marchenko--Pastur
+        d      = zeros(n, 1);
+        d(1)   = 1;
+        d(n)   = kappa;
+        c  = 0.5;
+        a  = (1 - c)^2;
+        bv = (1 + c)^2;
+        xi = sample_MP(n-2, a, bv, c);
+        d(2:n-1) = (d(1)*bv - d(n)*a) / (bv - a) ...
+                 + (d(n) - d(1)) / (bv - a) .* xi;
+        d(2:n-1) = max(d(2:n-1), 1);
+
+    case 3  % Two-block bimodal
+        d      = zeros(n, 1);
+        d(1)   = 1;
+        d(n)   = kappa;
+        half   = floor((n-2) / 2);
+        d(2 : 1+half)   = 1 + 0.2*(kappa-1) * rand(half, 1);
+        d(2+half : n-1) = 1 + 0.8*(kappa-1) + 0.2*(kappa-1) * rand(n-2-half, 1);
+
+    case 4  % Two-block asymmetric
+        d      = zeros(n, 1);
+        d(1)   = 1;
+        d(n)   = kappa;
+        half   = floor((n-2) / 2);
+        d(2 : 1+half)   = 1       + 99      * rand(half, 1);
+        d(2+half : n-1) = kappa/2 + kappa/2 * rand(n-2-half, 1);
+
+    otherwise
+        error('Unknown prob_type: %d', prob_type);
+
+end  
+
+
+Q = eye(n);
+for k = 1 : 3
+    w = randn(n, 1);
+    w = w / norm(w);
+    Q = Q - 2 * (Q * w) * w';
+end
+
+A  = Q * diag(d) * Q';
+A  = (A + A') / 2;      
+
+b  = -10 + 20 * rand(n, 1);   % b_i ~ U[-10, 10]
+x0 = randn(n, 1);              % x0 ~ N(0, I)
+
+end
