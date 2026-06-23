@@ -1,0 +1,118 @@
+function [iter, ghist] = NY(A, b, x0, maxiter, theta)
+%NY  Cyclic gradient method with NY stepsize, T=7
+
+
+if nargin < 4, maxiter = 10000; end
+if nargin < 5, theta   = 1e-6;  end
+
+T = 7;
+n = length(x0);
+ghist = zeros(n, maxiter);
+
+x      = x0;
+g      = A*x + b;
+normg0 = norm(g);
+
+aSD0     = [];
+aSD1     = [];
+g0_cycle = [];
+g1_cycle = [];
+alpha    = [];
+
+for iter = 1 : maxiter
+
+    phase = mod(iter-1, T);
+
+    switch phase
+        case 0
+            Ag    = A * g;
+            alpha = (g'*g) / (g'*Ag);
+            aSD0     = alpha;
+            g0_cycle = g;
+
+        case 1
+            Ag    = A * g;
+            alpha = (g'*g) / (g'*Ag);
+            aSD1     = alpha;
+            g1_cycle = g;
+
+        case 2
+            alpha = compute_NY(aSD0, aSD1, g0_cycle, g1_cycle, g, A);
+
+        otherwise   % phase = 3,4,5,6  重复 NY 步长
+            % alpha 不变
+
+    end
+
+    x = x - alpha * g;
+    g = A*x + b;
+    ghist(:, iter) = g;
+
+    if norm(g) < theta * normg0
+        return;
+    end
+end
+end
+
+
+function alpha_NY = compute_NY(aSD0, aSD1, g0, g1, g2, A)
+
+norm_g0_sq = g0'*g0;
+norm_g1_sq = g1'*g1;
+norm_g2_sq = g2'*g2;
+g2g0       = g2'*g0;
+
+beta  = norm_g2_sq / (aSD1^2 * norm_g1_sq);
+gamma = g2g0^2    / (norm_g0_sq * norm_g2_sq);
+
+% 退化到 2D
+if abs(1 - gamma) < 1e-12
+    alpha_NY = yuan_stepsize(aSD0, aSD1, g2, g1);
+    return;
+end
+
+% g2_tilde (eq. 2.3)
+g2t         = g2 - (g2g0 / norm_g0_sq) * g0;
+norm_g2t_sq = g2t'*g2t;
+
+% a33 via Rayleigh quotient (eq. 2.5)
+a33 = (g2t' * (A * g2t)) / norm_g2t_sq;
+
+% 特征多项式系数 (eq. 2.11)
+t1 = 1/aSD0 + 1/aSD1 + a33;
+t2 = 1/(aSD0*aSD1) + (1/aSD0 + 1/aSD1)*a33 - beta;
+t3 = a33/(aSD0*aSD1) - beta*(1-gamma)/aSD0 - a33*beta*gamma;
+
+% Cardano (eq. 2.12)
+p = t2 - t1^2/3;
+q = -2*t1^3/27 + t1*t2/3 - t3;
+
+if abs(p) < eps
+    alpha_NY = 1/t1;
+    return;
+end
+
+arg  = max(-1, min(1, (3*q)/(2*p) * sqrt(-3/p)));
+phi  = acos(arg) / 3;
+r    = 2*sqrt(-p/3);
+
+mu1 = t1/3 + r*cos(phi);
+mu2 = t1/3 + r*cos(phi - 2*pi/3);
+mu3 = t1/3 + r*cos(phi + 2*pi/3);
+
+mu_max = max([mu1, mu2, mu3]);
+
+if mu_max > eps
+    alpha_NY = 1 / mu_max;
+else
+    alpha_NY = aSD1;
+end
+end
+
+
+function alpha_Y = yuan_stepsize(aSD0, aSD1, g_curr, g_prev)
+norm_g_sq  = g_curr'*g_curr;
+norm_gp_sq = g_prev'*g_prev;
+disc       = sqrt((1/aSD0 - 1/aSD1)^2 + 4*norm_g_sq/(aSD1^2 * norm_gp_sq));
+alpha_Y    = 2 / (disc + 1/aSD0 + 1/aSD1);
+end
