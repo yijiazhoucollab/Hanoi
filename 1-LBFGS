@@ -1,0 +1,84 @@
+function [iter, x] = lbfgs(A, b, x0, m_mem, maxiter, theta)
+%LBFGS 1-Limited-memory BFGS
+
+
+if nargin < 4 || isempty(m_mem),   m_mem   = 5;     end
+if nargin < 5 || isempty(maxiter), maxiter = 50000;  end
+if nargin < 6 || isempty(theta),   theta   = 1e-8;   end
+
+grad = @(x) A*x + b;
+
+n      = length(x0);
+x      = x0;
+g      = grad(x);
+normg0 = norm(g);
+
+
+if normg0 < eps
+    iter = 0; return;
+end
+
+S   = zeros(n, m_mem);
+Y   = zeros(n, m_mem);
+rho = zeros(1, m_mem);
+m_cur = 0;
+ptr   = 0;
+
+for iter = 1 : maxiter
+
+    if norm(g) < theta * normg0
+        iter = iter - 1;
+        return;
+    end
+
+    %% Two-loop recursion
+    q        = g;
+    alpha_tl = zeros(1, m_mem);
+
+    for i = 1 : m_cur
+        idx         = mod(ptr - i, m_mem) + 1;
+        alpha_tl(i) = rho(idx) * (S(:,idx)' * q);
+        q           = q - alpha_tl(i) * Y(:,idx);
+    end
+
+
+    if m_cur > 0
+        idx0  = mod(ptr - 1, m_mem) + 1;
+        gamma = (S(:,idx0)' * Y(:,idx0)) / (Y(:,idx0)' * Y(:,idx0));
+    else
+        gamma = 1.0;   
+    end
+
+    r = gamma * q;
+
+
+    for i = m_cur : -1 : 1
+        idx  = mod(ptr - i, m_mem) + 1;
+        beta = rho(idx) * (Y(:,idx)' * r);
+        r    = r + S(:,idx) * (alpha_tl(i) - beta);
+    end
+
+    d = -r;
+
+
+    x_new = x + d;
+    g_new = grad(x_new);
+
+   
+    s_new  = d;
+    y_new  = g_new - g;
+    sy_new = s_new' * y_new;
+
+    if sy_new > 1e-10 * norm(s_new) * norm(y_new)
+        ptr       = mod(ptr, m_mem) + 1;
+        S(:, ptr) = s_new;
+        Y(:, ptr) = y_new;
+        rho(ptr)  = 1 / sy_new;
+        m_cur     = min(m_cur + 1, m_mem);
+    end
+
+    x = x_new;
+    g = g_new;
+
+end
+end
