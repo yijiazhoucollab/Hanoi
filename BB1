@@ -1,0 +1,60 @@
+function [iter, ghist] = BB1(A, b, x0, maxiter, theta)
+%BB1  Barzilai--Borwein gradient method (BB1 stepsize)
+
+
+if nargin < 4 || isempty(maxiter), maxiter = 50000; end
+if nargin < 5 || isempty(theta),   theta   = 1e-8;  end
+
+n      = length(x0);
+ghist  = zeros(n, maxiter);
+
+x      = x0;
+g      = A*x + b;
+normg0 = norm(g);
+
+if normg0 < eps
+    iter = 0;
+    return;
+end
+
+%% --- first step: steepest descent (no previous iterate available) ---
+Ag    = A * g;
+alpha = (g'*g) / (g'*Ag);
+
+x_prev = x;
+g_prev = g;
+
+x = x - alpha * g;
+g = A*x + b;
+ghist(:, 1) = g;
+
+if norm(g) < theta * normg0
+    iter = 1;
+    return;
+end
+
+%% --- main loop ---
+for iter = 2 : maxiter
+
+    s   = x - x_prev;       %  s_{k-1} = x_k - x_{k-1}
+    y   = g - g_prev;       %  y_{k-1} = g_k - g_{k-1}
+    sy  = s' * y;
+    ss  = s' * s;
+
+    if sy > eps * ss         %  safeguard: skip if curvature is negligible
+        alpha = ss / sy;
+    end
+    %  else: keep previous alpha
+
+    x_prev = x;
+    g_prev = g;
+
+    x = x - alpha * g;
+    g = A*x + b;
+    ghist(:, iter) = g;
+
+    if norm(g) < theta * normg0
+        return;
+    end
+end
+end
